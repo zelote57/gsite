@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- <script src="https://www.google.com/recaptcha/api.js?render=6LfFQ08qAAAAAEWCMmOTUxDjG13nzIRdQfYaVner"></script> -->
+  <script src="script.js" defer></script>
+
+  <title>Consumir API con Fetch</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background-color: #f4f4f4;
+    }
+
+    button {
+      padding: 10px 15px;
+      margin: 10px;
+      border: none;
+      background-color: #007bff;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .grecaptcha-badge {
+      width: 70px !important;
+      overflow: hidden !important;
+      transition: all 0.3s ease !important;
+      left: -2px !important;
+      bottom: 398px !important;
+    }
+
+    .grecaptcha-badge:hover {
+      width: 256px !important;
+    }
+
+    #response {
+      margin-top: 20px;
+      padding: 10px;
+      background: white;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      min-width: 300px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>Test</h2>
+  <button onclick="callApiWithoutCookie()">Llamar API</button>
+  <div id="response">Aquí se mostrará el mensaje</div>
+</body>
+
+</html>

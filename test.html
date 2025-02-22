@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        #log {
+            width: 100%;
+            height: 200px;
+            overflow-y: auto;
+            background: #f5f5f5;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        #response {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background: #eef;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Authentication Test</h2>
+    <button onclick="initAuth()">Start Authentication</button>
+    <button onclick="logoutUser()">Logout</button>
+    <button onclick="refreshToken()">Refresh Token</button>
+    <button onclick="callApiWithoutCookie()">Call API Without Cookie</button>
+    <div>
+        <h3>Logs:</h3>
+        <textarea id="log" readonly></textarea>
+    </div>
+    <div id="response">API Response will appear here</div>
+
+    <script>
+        const AUTH_API_URL = "https://api-ra-b0bacqgeeebmave4.brazilsouth-01.azurewebsites.net/api";
+        let consecutiveRetryCount = 0;
+        const MAX_CONSECUTIVE_RETRIES = 5;
+        let authPromise = null;
+
+        function showResponse(message, color) {
+            const responseDiv = document.getElementById("response");
+            responseDiv.textContent = message;
+            responseDiv.style.color = color;
+        }
+
+        async function callApiWithoutCookie() {
+            try {
+                const url = `${AUTH_API_URL}/hi`;
+                const result = await fetchData(url, null, "POST", false);
+                showResponse(result?.result?.message || "Error en la respuesta", "black");
+            } catch (error) {
+                showResponse("Error al conectar con la API", "red");
+                console.error("Error:", error);
+            }
+        }
+
+        async function fetchData(url, params = null, method = "GET", handleRedirect = true) {
+            try {
+                const options = {
+                    method: method,
+                    headers: {},
+                };
+
+                const token = sessionStorage.getItem("authToken");
+                if (token) {
+                    options.headers["Authorization"] = `Bearer ${token}`;
+                }
+
+                if (params) {
+                    options.headers["Content-Type"] = "application/json";
+                    options.body = JSON.stringify(params);
+                }
+
+                const response = await fetch(url, options);
+                logMessage(`HTTP Status from ${url}: ${response.status}`);
+
+                if (response.status !== 200 && handleRedirect) {
+                    logMessage("Redirección a mantenimiento");
+                    return;
+                }
+
+                let data = null;
+                try {
+                    data = await response.json();
+                    logMessage(`API Response from ${url}: ${JSON.stringify(data)}`);
+                } catch (parseError) {
+                    logMessage("Error parsing response as JSON: " + parseError);
+                    data = null;
+                }
+
+                if (!response.ok) {
+                    return data || { errorMessage: `API error: ${response.status}` };
+                }
+                return data;
+            } catch (error) {
+                logMessage(`Error fetching data from ${url}: ${error}`);
+                if (handleRedirect) {
+                    logMessage("Redirección a mantenimiento");
+                    return;
+                }
+                return { errorMessage: "Error interno al intentar obtener datos." };
+            }
+        }
+
+        function logMessage(message) {
+            const logArea = document.getElementById("log");
+            logArea.value += message + "\n";
+            logArea.scrollTop = logArea.scrollHeight;
+            console.log(message);
+        }
+
+        async function initAuth() {
+            logMessage("Starting authentication...");
+            let token = sessionStorage.getItem("authToken");
+            if (!token) {
+                logMessage("No token found, requesting a new one...");
+                token = await fetchInitialTokens();
+                if (!token) {
+                    logMessage("Failed to obtain a token. Logging out.");
+                    logoutUser();
+                    return null;
+                }
+            }
+            consecutiveRetryCount = 0;
+            logMessage("Token obtained. Setting up refresh scheduler.");
+            startRefreshScheduler(token);
+            return token;
+        }
+
+        async function fetchInitialTokens() {
+            try {
+                const response = await fetch(`${AUTH_API_URL}/auth/challenge`, { method: "GET", credentials: "include" });
+                const data = await handleApiResponse(response);
+                if (!data) return null;
+
+                const validateResponse = await fetch(`${AUTH_API_URL}/auth/validate`, { method: "POST", credentials: "include" });
+                const validateData = await handleApiResponse(validateResponse);
+                if (!validateData || !validateData.result?.token) return null;
+
+                sessionStorage.setItem("authToken", validateData.result.token);
+                return validateData.result.token;
+            } catch (error) {
+                logMessage("Error fetching initial tokens: " + error);
+                return null;
+            }
+        }
+
+        function startRefreshScheduler(token) {
+            const expiresIn = getTokenRemainingTime(token);
+            if (expiresIn <= 0) {
+                logMessage("Token expired. Refreshing now.");
+                refreshToken();
+                return;
+            }
+            const refreshTime = Math.max(expiresIn - 60, 5);
+            logMessage(`Scheduling token refresh in ${refreshTime} seconds.`);
+            setTimeout(refreshToken, refreshTime * 1000);
+        }
+
+        async function refreshToken(attempt = 1) {
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY = 3000;
+            logMessage(`Refreshing token (Attempt ${attempt})...`);
+            try {
+                const oldToken = sessionStorage.getItem("authToken");
+                if (!oldToken) {
+                    logMessage("No token found in session storage.");
+                    return;
+                }
+                const response = await fetch(`${AUTH_API_URL}/auth/refresh`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ expiredAccessToken: oldToken })
+                });
+                const data = await handleApiResponse(response);
+                if (!data || !data.result?.token) {
+                    if (attempt < MAX_RETRIES) {
+                        logMessage(`Retrying token refresh in ${RETRY_DELAY / 1000} seconds...`);
+                        setTimeout(() => refreshToken(attempt + 1), RETRY_DELAY);
+                    } else {
+                        logMessage("Max retry attempts reached. Logging out.");
+                        logoutUser();
+                    }
+                    return;
+                }
+                sessionStorage.setItem("authToken", data.result.token);
+                logMessage(`Token refreshed successfully: ${data.result.token}`);
+                startRefreshScheduler(data.result.token);
+            } catch (error) {
+                logMessage(`Error during token refresh: ${error}`);
+                if (attempt < MAX_RETRIES) {
+                    setTimeout(() => refreshToken(attempt + 1), RETRY_DELAY);
+                } else {
+                    logoutUser();
+                }
+            }
+        }
+
+        async function handleApiResponse(response) {
+            if (!response.ok) {
+                logMessage(`API Error: ${response.status}`);
+                return null;
+            }
+            try {
+                const data = await response.json();
+                logMessage(`API Response: ${JSON.stringify(data)}`);
+                return data;
+            } catch (error) {
+                logMessage("Failed to parse JSON response: " + error);
+                return null;
+            }
+        }
+
+        function getTokenRemainingTime(token) {
+            try {
+                const decoded = JSON.parse(atob(token.split(".")[1]));
+                return decoded.exp - Math.floor(Date.now() / 1000);
+            } catch (error) {
+                logMessage("Error decoding token: " + error);
+                return 0;
+            }
+        }
+
+        function logoutUser() {
+            logMessage("Logging out user...");
+            sessionStorage.removeItem("authToken");
+            consecutiveRetryCount++;
+            if (consecutiveRetryCount >= MAX_CONSECUTIVE_RETRIES) {
+                logMessage("Too many retries. Redirecting to maintenance page.");
+            } else {
+                logMessage("Retrying authentication in 3 seconds...");
+                setTimeout(initAuth, 3000);
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            logMessage("Initializing authentication...");
+            authPromise = initAuth();
+        });
+    </script>
+</body>
+
+</html>
